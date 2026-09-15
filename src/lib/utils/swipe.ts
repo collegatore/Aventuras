@@ -31,13 +31,7 @@ export interface SwipeOptions {
   preventDefault?: boolean
 }
 
-/**
- * Text entry owns its own horizontal drags.
- *
- * Placing a caret or selecting what has been typed is a sideways gesture inside whatever region
- * the field happens to sit in, and reading it as a swipe costs the writer the edit they were
- * making — the panel closes, or the card folds and takes the field with it.
- */
+/** Text entry owns its own horizontal drags: a caret or a selection is not a swipe. */
 function startsInTextEntry(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
   return !!target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')
