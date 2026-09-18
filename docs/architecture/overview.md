@@ -69,6 +69,26 @@ that band. Because swipes inside a panel bubble up to the shell, a panel must ne
 opposite edge's band. On a phone neither does: the sidebar is capped at 288px and the navigation
 panel at `100vw - 3rem`.
 
+### Focus inside a long dialog
+
+`Dialog.Content` traps focus, and the trap has one fallback: when the element holding focus is
+removed from the DOM, it focuses the first tabbable element in the dialog. A long editing dialog
+removes focused elements all the time (a card folds, a Clear button vanishes, an overlay's Back
+button unmounts), and a fallback that lands on a control at the top scrolls the whole surface up
+to it. `TimelineRepairModal.svelte` is the worked case.
+
+The rule that makes this a non-problem rather than a list of cases: **the dialog's scroll region
+is its first tabbable element** (`tabindex="0"`, `role="region"`), sized to the viewport rather
+than to its content. Every fallback then lands on a container already in view, and focusing it
+does not scroll. Two things keep that true, and both are structural:
+
+- nothing tabbable is placed before the region in DOM order — in the narrow layout that means
+  the title strip above it, in the wide layout the region already wraps the title;
+- the region keeps its `min-h-0 flex-1` sizing, so it never grows past the viewport.
+
+`holdFocus` calls remain where a card is about to disappear under an open soft keyboard, so the
+keyboard closes before the card does; they are no longer what stops the scroll.
+
 ## Data Model
 
 The story is an append-only list of `StoryEntry` rows (`user_action`, `narration`, `system`,
