@@ -57,10 +57,17 @@ Only the _first_ opening uses that default. Both panels keep their current tab i
 reader to where they were. Holding it in the panel would reset it on every mount, which reads as
 the panel forgetting what you were doing.
 
-The edge zones themselves live in `AppShell.svelte` and are deliberately asymmetric. The right one
-is mounted whenever the sidebar is closed; the left one only while _neither_ panel is open, because
-a right-swipe inside the open sidebar already belongs to that sidebar's tab strip and must not also
+The edge swipes live in `AppShell.svelte` and are deliberately asymmetric. The right one opens the
+sidebar whenever it is closed; the left one only while _neither_ panel is open, because a
+right-swipe inside the open sidebar already belongs to that sidebar's tab strip and must not also
 open the panel behind it.
+
+They are read off the shell itself, counting only gestures that _start_ within 30px of an edge (20px
+above the mobile breakpoint), not from invisible strips over the page. A strip takes every tap that
+lands on it, and on a phone the outer halves of the header's panel button and of Send sit within
+that band. Because swipes inside a panel bubble up to the shell, a panel must never reach the
+opposite edge's band. On a phone neither does: the sidebar is capped at 288px and the navigation
+panel at `100vw - 3rem`.
 
 ## Data Model
 
