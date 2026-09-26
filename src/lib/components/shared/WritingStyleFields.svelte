@@ -111,7 +111,7 @@
   // Names only: what each length asks for is up to the story's prompt pack, so no paragraph
   // count shown here could be relied on.
   const lengthOptions: { id: TargetLength; label: string }[] = [
-    { id: 'dynamic', label: 'Auto' },
+    { id: 'dynamic', label: 'Dynamic' },
     { id: 'short', label: 'Short' },
     { id: 'medium', label: 'Medium' },
     { id: 'long', label: 'Long' },
