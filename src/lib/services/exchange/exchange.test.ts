@@ -171,9 +171,30 @@ describe('exchange / envelope', () => {
     if (res.kind === 'invalid') expect(res.error).toMatch(/Unknown Aventuras export type "pet"/)
   })
 
-  it('rejects a document without a version', () => {
+  it('rejects a document without a version, naming the field', () => {
     const text = JSON.stringify({ format: EXCHANGE_FORMAT, entity: 'character', data: {} })
-    expect(parseExchange(text, 'character').kind).toBe('invalid')
+    const res = parseExchange(text, 'character')
+    expect(res.kind).toBe('invalid')
+    if (res.kind === 'invalid') expect(res.error).toMatch(/header is not valid at "formatVersion"/)
+  })
+
+  it('names the header field whose type is wrong', () => {
+    const text = JSON.stringify({
+      format: EXCHANGE_FORMAT,
+      formatVersion: 1,
+      entity: 'character',
+      data: {},
+    })
+    const res = parseExchange(text, 'character')
+    if (res.kind !== 'invalid') throw new Error(res.kind)
+    expect(res.error).toMatch(/at "formatVersion"/)
+  })
+
+  it('refuses to export a record the vault still holds unnamed', () => {
+    expect(() => vaultLorebookToExchange({ ...vaultLorebook, name: '' })).toThrow(
+      /Give this lorebook a name/,
+    )
+    expect(() => scenarioToExchange({ ...scenario, name: '  ' })).toThrow(/Give this scenario/)
   })
 })
 

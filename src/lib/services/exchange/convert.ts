@@ -40,6 +40,12 @@ export function portableMetadata(
   return out
 }
 
+/** The importer requires a name, so a record still unnamed in the vault cannot be exported yet. */
+function requireName(entity: ExchangeEntity, name: string): string {
+  if (!name.trim()) throw new Error(`Give this ${entity} a name before exporting it.`)
+  return name
+}
+
 export function wrapExchange<E extends ExchangeEntity>(
   entity: E,
   data: ExchangePayloads[E],
@@ -61,7 +67,7 @@ export function serializeExchange(document: ExchangeDocument): string {
 
 export function characterToExchange(character: VaultCharacter): ExchangeCharacter {
   return {
-    name: character.name,
+    name: requireName('character', character.name),
     description: character.description,
     traits: [...character.traits],
     visualDescriptors: { ...character.visualDescriptors },
@@ -101,7 +107,7 @@ export function exchangeToCharacter(
 
 export function scenarioToExchange(scenario: VaultScenario): ExchangeScenario {
   return {
-    name: scenario.name,
+    name: requireName('scenario', scenario.name),
     description: scenario.description,
     settingSeed: scenario.settingSeed,
     npcs: scenario.npcs.map((npc) => ({ ...npc, traits: [...npc.traits] })),
@@ -149,7 +155,7 @@ export function exchangeToScenario(
 
 export function vaultLorebookToExchange(lorebook: VaultLorebook): ExchangeLorebook {
   return {
-    name: lorebook.name,
+    name: requireName('lorebook', lorebook.name),
     description: lorebook.description,
     tags: [...lorebook.tags],
     favorite: lorebook.favorite,

@@ -14,6 +14,16 @@ function isEntity(value: string): value is ExchangeEntity {
  * and belongs to the caller's existing path; anything with the marker is ours to accept or
  * reject, and never falls through.
  */
+export function hasExchangeMarker(raw: unknown): raw is { format: typeof EXCHANGE_FORMAT } {
+  return (
+    !!raw && typeof raw === 'object' && (raw as { format?: unknown }).format === EXCHANGE_FORMAT
+  )
+}
+
+function where(issue: { path: PropertyKey[] } | undefined): string {
+  return issue?.path.length ? ` at "${issue.path.map(String).join('.')}"` : ''
+}
+
 export function parseExchange<E extends ExchangeEntity>(
   text: string,
   expected: E,
@@ -31,13 +41,15 @@ export function classifyExchange<E extends ExchangeEntity>(
   raw: unknown,
   expected: E,
 ): ExchangeParseResult<E> {
-  if (!raw || typeof raw !== 'object' || (raw as { format?: unknown }).format !== EXCHANGE_FORMAT) {
-    return { kind: 'external' }
-  }
+  if (!hasExchangeMarker(raw)) return { kind: 'external' }
 
   const envelope = envelopeSchema.safeParse(raw)
   if (!envelope.success) {
-    return { kind: 'invalid', error: 'This Aventuras file is missing its format header.' }
+    const issue = envelope.error.issues[0]
+    return {
+      kind: 'invalid',
+      error: `This Aventuras file's format header is not valid${where(issue)}: ${issue?.message ?? 'unknown error'}.`,
+    }
   }
 
   const { formatVersion, entity, exportedAt, data } = envelope.data
@@ -57,10 +69,9 @@ export function classifyExchange<E extends ExchangeEntity>(
   const payload = payloadSchemas[expected].safeParse(data)
   if (!payload.success) {
     const issue = payload.error.issues[0]
-    const where = issue?.path.length ? ` at "${issue.path.join('.')}"` : ''
     return {
       kind: 'invalid',
-      error: `This Aventuras ${expected} file is not valid${where}: ${issue?.message ?? 'unknown error'}.`,
+      error: `This Aventuras ${expected} file is not valid${where(issue)}: ${issue?.message ?? 'unknown error'}.`,
     }
   }
 
@@ -86,9 +97,7 @@ export function exchangeImportRedirect(text: string): string | null {
   } catch {
     return null
   }
-  if (!raw || typeof raw !== 'object' || (raw as { format?: unknown }).format !== EXCHANGE_FORMAT) {
-    return null
-  }
+  if (!hasExchangeMarker(raw)) return null
   const entity = (raw as { entity?: unknown }).entity
   const what = typeof entity === 'string' && isEntity(entity) ? entity : 'item'
   return `This is an Aventuras ${what} export, not a character card. Import it into the Vault, then pick it from there.`
