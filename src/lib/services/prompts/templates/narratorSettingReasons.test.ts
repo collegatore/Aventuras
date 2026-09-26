@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { narratorSettingReasons } from './narratorSettingReasons'
+import {
+  narratorSettingReasons,
+  TARGET_RESPONSE_LENGTH_VAR,
+  NARRATOR_REINFORCEMENT_VAR,
+} from './narratorSettingReasons'
+import { templateReferencesVariable } from './templateReferences'
 import { storyTemplates } from './narrative'
 
 const LENGTH = `{% case targetResponseLength %}{% when 'short' %}x{% endcase %}`
@@ -60,3 +65,21 @@ describe('narratorSettingReasons', () => {
     ).toBeDefined()
   })
 })
+
+// Where the shipped narrator templates carry each setting, so an edit that drops one fails here
+// rather than silently disabling the control for every story on the built-in pack.
+describe.each(storyTemplates.map((t) => [t.id, t] as const))(
+  '%s shipped template',
+  (_id, template) => {
+    it('picks its length line in the system half', () => {
+      expect(templateReferencesVariable(template.content, TARGET_RESPONSE_LENGTH_VAR)).toBe(true)
+    })
+
+    it('carries the reinforcement in the turn message, not the system half', () => {
+      expect(templateReferencesVariable(template.userContent, NARRATOR_REINFORCEMENT_VAR)).toBe(
+        true,
+      )
+      expect(templateReferencesVariable(template.content, NARRATOR_REINFORCEMENT_VAR)).toBe(false)
+    })
+  },
+)
