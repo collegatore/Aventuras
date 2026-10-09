@@ -56,7 +56,13 @@ describe('fromWorldStateDelta', () => {
     const plan = planReversal({
       state: {
         characters: [
-          { id: 'c-old', name: 'Aria', relationship: 'rival', status: 'active', traits: [] } as never,
+          {
+            id: 'c-old',
+            name: 'Aria',
+            relationship: 'rival',
+            status: 'active',
+            traits: [],
+          } as never,
           { id: 'c-new', name: 'New' } as never,
         ],
         locations: [
