@@ -21,6 +21,7 @@
   import EmptyState from '$lib/components/ui/empty-state/empty-state.svelte'
   import * as Tabs from '$lib/components/ui/tabs'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu'
+  import * as Popover from '$lib/components/ui/popover'
   import TimelinePanel from '$lib/components/world/TimelinePanel.svelte'
   import { swipe } from '$lib/utils/swipe'
   import {
@@ -498,6 +499,35 @@
                       >
                     </span>
                   </button>
+                  {#if landmark.kind === 'tail'}
+                    <div
+                      class="can-hover:opacity-0 absolute top-1 right-1 flex transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                    >
+                      <Popover.Root bind:open={tailInfoOpen}>
+                        <Popover.Trigger>
+                          {#snippet child({ props })}
+                            <button
+                              {...props}
+                              class="text-surface-500 hover:text-surface-200 tap-target"
+                              aria-label="About this landmark"
+                              onpointerenter={(e) => hoverTailInfo(e, true)}
+                              onpointerleave={(e) => hoverTailInfo(e, false)}
+                            >
+                              <Info class="can-hover:size-3 size-4" />
+                            </button>
+                          {/snippet}
+                        </Popover.Trigger>
+                        <!-- Dark on light, as the native tooltips beside it are. -->
+                        <Popover.Content
+                          class="w-60 rounded-sm border-neutral-300 bg-white px-2 py-1.5 text-xs text-neutral-900 shadow-md"
+                          align="end"
+                        >
+                          Points at the first entry after the last chapter: the part of the story
+                          not in a chapter yet. When the next chapter is written, it moves past it.
+                        </Popover.Content>
+                      </Popover.Root>
+                    </div>
+                  {/if}
                   {#if landmark.kind === 'snapshot' && canCheckpointAt(landmark)}
                     <div
                       class="can-hover:opacity-0 absolute top-1 right-1 flex transition-opacity group-hover:opacity-100 focus-within:opacity-100"
