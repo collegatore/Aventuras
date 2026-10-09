@@ -37,7 +37,7 @@
   import * as Dialog from '$lib/components/ui/dialog'
   import { database } from '$lib/services/database'
   import { story } from '$lib/stores/story.svelte'
-  import { isAndroid } from '$lib/utils/platform'
+  import { isAndroid, isIos } from '$lib/utils/platform'
   import { autosize } from '$lib/utils/autosize'
   import { ask, open } from '@tauri-apps/plugin-dialog'
   import { openFilters } from '$lib/utils/dialogFilters'
