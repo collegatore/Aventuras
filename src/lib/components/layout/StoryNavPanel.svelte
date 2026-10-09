@@ -1,13 +1,16 @@
 <script lang="ts">
   import { story } from '$lib/stores/story.svelte'
   import { ui } from '$lib/stores/ui.svelte'
+  import { settings } from '$lib/stores/settings.svelte'
   import {
     buildLandmarks,
     checkpointDeletionBlocker,
     entryNumber,
     jumpToEntry,
     resolveEntryByNumber,
+    withSnapshotLandmarks,
     type Landmark,
+    type SnapshotMark,
   } from '$lib/utils/storyNavigation'
   import { supportsHover } from '$lib/utils/platform'
   import { ask } from '@tauri-apps/plugin-dialog'
@@ -18,7 +21,6 @@
   import EmptyState from '$lib/components/ui/empty-state/empty-state.svelte'
   import * as Tabs from '$lib/components/ui/tabs'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu'
-  import * as Popover from '$lib/components/ui/popover'
   import TimelinePanel from '$lib/components/world/TimelinePanel.svelte'
   import { swipe } from '$lib/utils/swipe'
   import {
@@ -26,6 +28,8 @@
     ArrowUpToLine,
     BookOpen,
     Bookmark,
+    BookmarkPlus,
+    Camera,
     Check,
     ChevronDown,
     ChevronRight,
@@ -109,16 +113,55 @@
   const showFirstLast = $derived(ui.navShowFirstLast)
   const showCheckpoints = $derived(ui.navShowCheckpoints)
 
-  const filtered = $derived(!showChapters || !showFirstLast || !showCheckpoints)
+  // Not remembered: snapshots are looked up for one visit, not listed on every one.
+  let showSnapshots = $state(false)
+  let snapshotMarks = $state<SnapshotMark[]>([])
+  const tracking = $derived(settings.experimentalFeatures.stateTracking)
 
-  const landmarks = $derived(
-    landmarkList.landmarks.filter((landmark) => {
+  $effect(() => {
+    // A new entry can bring a new snapshot; a branch or story switch brings another set.
+    void story.entries.length
+    void story.currentStory?.currentBranchId
+    if (!showSnapshots || !tracking) return
+    void story.snapshotMarks().then((marks) => (snapshotMarks = marks))
+  })
+
+  const filtered = $derived(
+    !showChapters || !showFirstLast || !showCheckpoints || (showSnapshots && tracking),
+  )
+
+  const landmarks = $derived.by(() => {
+    const shown = landmarkList.landmarks.filter((landmark) => {
       if (landmark.kind === 'chapter' || landmark.kind === 'tail') return showChapters
       if (landmark.kind === 'first' || landmark.kind === 'last') return showFirstLast
       if (landmark.kind === 'origin' || landmark.kind === 'checkpoint') return showCheckpoints
       return true
-    }),
-  )
+    })
+    if (!showSnapshots || !tracking) return shown
+    return withSnapshotLandmarks(
+      shown,
+      snapshotMarks,
+      story.entries,
+      activeBranch?.id ?? null,
+      activeBranch?.name ?? 'Main',
+    )
+  })
+
+  /** Snapshot rows offer a checkpoint where the entry form would. */
+  function canCheckpointAt(landmark: Landmark): boolean {
+    const entry = story.entries.find((e) => e.id === landmark.entryId)
+    return (
+      !!entry &&
+      entry.type !== 'system' &&
+      (entry.branchId ?? null) === (story.currentStory?.currentBranchId ?? null) &&
+      !story.checkpoints.some((c) => c.lastEntryId === entry.id)
+    )
+  }
+
+  async function checkpointAt(landmark: Landmark) {
+    await goToLandmark(landmark)
+    ui.requestCheckpointForm(landmark.entryId)
+  }
 
   // Not persisted with the panel's own state: a reader who opens this to clear one checkpoint out
   // does not want it open on every story afterwards. Closing the panel unmounts this component,
@@ -358,6 +401,11 @@
               >
                 Show checkpoints
               </DropdownMenu.CheckboxItem>
+              {#if tracking}
+                <DropdownMenu.CheckboxItem bind:checked={showSnapshots} closeOnSelect={false}>
+                  Show snapshots
+                </DropdownMenu.CheckboxItem>
+              {/if}
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>
@@ -372,7 +420,7 @@
           />
         {:else}
           <div class="space-y-1">
-            {#each landmarks as landmark (`${landmark.kind}:${landmark.checkpointId ?? landmark.entryId}`)}
+            {#each landmarks as landmark (`${landmark.kind}:${landmark.snapshotId ?? landmark.checkpointId ?? landmark.entryId}`)}
               <div
                 class="group hover:bg-surface-700/50 can-hover:min-h-0 relative min-h-[40px] rounded-lg transition-colors"
               >
@@ -430,6 +478,8 @@
                       <ArrowUpToLine class="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
                     {:else if landmark.kind === 'last'}
                       <ArrowDownToLine class="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
+                    {:else if landmark.kind === 'snapshot'}
+                      <Camera class="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
                     {:else}
                       <Bookmark class="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
                     {/if}
@@ -448,33 +498,18 @@
                       >
                     </span>
                   </button>
-                  {#if landmark.kind === 'tail'}
+                  {#if landmark.kind === 'snapshot' && canCheckpointAt(landmark)}
                     <div
                       class="can-hover:opacity-0 absolute top-1 right-1 flex transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                     >
-                      <Popover.Root bind:open={tailInfoOpen}>
-                        <Popover.Trigger>
-                          {#snippet child({ props })}
-                            <button
-                              {...props}
-                              class="text-surface-500 hover:text-surface-200 tap-target"
-                              aria-label="About this landmark"
-                              onpointerenter={(e) => hoverTailInfo(e, true)}
-                              onpointerleave={(e) => hoverTailInfo(e, false)}
-                            >
-                              <Info class="can-hover:size-3 size-4" />
-                            </button>
-                          {/snippet}
-                        </Popover.Trigger>
-                        <!-- Dark on light, as the native tooltips beside it are. -->
-                        <Popover.Content
-                          class="w-60 rounded-sm border-neutral-300 bg-white px-2 py-1.5 text-xs text-neutral-900 shadow-md"
-                          align="end"
-                        >
-                          Points at the first entry after the last chapter: the part of the story
-                          not in a chapter yet. When the next chapter is written, it moves past it.
-                        </Popover.Content>
-                      </Popover.Root>
+                      <button
+                        class="text-surface-500 hover:text-surface-200 tap-target"
+                        onclick={() => void checkpointAt(landmark)}
+                        title="Create checkpoint here"
+                        aria-label="Create checkpoint at this snapshot"
+                      >
+                        <BookmarkPlus class="can-hover:size-3 size-4" />
+                      </button>
                     </div>
                   {/if}
                   {#if landmark.checkpointId}
