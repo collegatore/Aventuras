@@ -54,10 +54,22 @@
       }
       expandedBranches = next
     })
+    revealed = { branchId }
+  })
+
+  let revealed = $state<{ branchId: string | null } | null>(null)
+
+  // Inactive tabs stay mounted but hidden, where nothing can be measured: scroll once Branches shows.
+  $effect(() => {
+    if (!revealed || ui.sidebarTab !== 'branches') return
     void scrollCurrentRowIntoView()
   })
 
-  let treeScroller = $state<HTMLDivElement | null>(null)
+  let treeScroller: HTMLDivElement | null = null
+  let treeOverflows = $state(false)
+  // Controls sit at the right edge while the tree fits; once it scrolls they follow the name, or
+  // every row would stretch to the widest one and push them out of view.
+  const nameFill = $derived(treeOverflows ? '' : 'flex-1')
 
   /** Scroll offset that brings `[start, end]` into `[viewStart, viewEnd]`, `start` winning. */
   function nearestDelta(start: number, end: number, viewStart: number, viewEnd: number): number {
@@ -73,12 +85,13 @@
     const scroller = treeScroller
     const name = scroller?.querySelector<HTMLElement>('[data-current-name]')
     const row = name?.parentElement
-    if (!scroller || !name || !row) return
+    if (!scroller?.clientWidth || !name || !row) return
 
     const view = scroller.getBoundingClientRect()
     const rowBox = row.getBoundingClientRect()
     const nameBox = name.getBoundingClientRect()
-    scroller.scrollLeft += nearestDelta(rowBox.left, nameBox.right, view.left, view.right)
+    const start = nameBox.right - rowBox.left <= view.width ? rowBox.left : nameBox.left
+    scroller.scrollLeft += nearestDelta(start, nameBox.right, view.left, view.right)
 
     let panel = scroller.parentElement
     while (panel && !/auto|scroll/.test(getComputedStyle(panel).overflowY)) {
@@ -87,6 +100,19 @@
     if (!panel) return
     const panelBox = panel.getBoundingClientRect()
     panel.scrollTop += nearestDelta(rowBox.top, rowBox.bottom, panelBox.top, panelBox.bottom)
+  }
+
+  function tracksOverflow(node: HTMLElement) {
+    const observer = new ResizeObserver(() => {
+      treeOverflows = node.scrollWidth > node.clientWidth
+    })
+    observer.observe(node)
+    if (node.firstElementChild) observer.observe(node.firstElementChild)
+    return {
+      destroy() {
+        observer.disconnect()
+      },
+    }
   }
 
   /**
@@ -465,7 +491,7 @@
             </button>
           {:else}
             <span
-              class="text-surface-200 flex-1 text-sm whitespace-nowrap"
+              class="text-surface-200 text-sm whitespace-nowrap {nameFill}"
               data-current-name={isCurrent(branch.id) || undefined}>{branch.name}</span
             >
             <span class="text-surface-500 text-xs">{getBranchEntryCount(branch.id)}</span>
@@ -510,7 +536,12 @@
     {/snippet}
 
     <!-- Branch Tree: scrolls sideways when deep, so names are never cut. -->
-    <div bind:this={treeScroller} class="overflow-x-auto" use:keepsSidewaysSwipes>
+    <div
+      bind:this={treeScroller}
+      class="overflow-x-auto"
+      use:tracksOverflow
+      use:keepsSidewaysSwipes
+    >
       <div class="w-max min-w-full space-y-1">
         <!-- Main Branch -->
         <div
@@ -539,7 +570,7 @@
           </button>
           <GitBranch class="text-surface-400 h-4 w-4" />
           <span
-            class="text-surface-200 flex-1 text-sm"
+            class="text-surface-200 text-sm {nameFill}"
             data-current-name={isCurrent(null) || undefined}>Main</span
           >
           <span class="text-surface-500 text-xs">{getBranchEntryCount(null)}</span>
