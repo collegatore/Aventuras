@@ -243,10 +243,15 @@
           const prevEl = el.previousElementSibling
           if (prevEl) {
             const prevRect = prevEl.getBoundingClientRect()
-            const distance = el.getBoundingClientRect().top - prevRect.top
-            // Half the gap between cards: any more and the card before this one shows above it.
-            const margin = Math.floor((distance - prevRect.height) * 0.8)
-            storyContainer.scrollTop -= contextLift(distance, storyContainer.clientHeight, margin)
+            const elTop = el.getBoundingClientRect().top
+            storyContainer.scrollTop -= contextLift({
+              distance: elTop - prevRect.top,
+              aboveHeight: prevRect.height,
+              // Near the end the container cannot scroll the landing to its top, and the
+              // entry above is already in view by that much.
+              offset: elTop - storyContainer.getBoundingClientRect().top,
+              viewportHeight: storyContainer.clientHeight,
+            })
           }
         }
       } else {
@@ -290,8 +295,9 @@
     const total = entries.length
     prevEntryCount = total
     // Landing away from the end is a scroll break: the next narration must not yank
-    // the view back to the bottom while the user reads where they asked to be.
-    ui.setScrollBreak(true)
+    // the view back to the bottom while the user reads where they asked to be. Landing on the
+    // last entry is not away from it, so a streaming narration is followed as usual.
+    ui.setScrollBreak(idx !== total - 1)
     windowStart = Math.max(0, idx - FORK_CONTEXT_BEFORE)
     windowEnd = Math.min(total, idx + DEFAULT_VISIBLE_ENTRIES)
     await tick()

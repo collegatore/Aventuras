@@ -5,13 +5,17 @@
     buildLandmarks,
     checkpointDeletionBlocker,
     entryNumber,
+    filterLandmarks,
+    LANDMARK_FILTER_GROUPS,
     jumpToEntry,
     resolveEntryByNumber,
     type Landmark,
+    type LandmarkFilterGroup,
   } from '$lib/utils/storyNavigation'
   import { supportsHover } from '$lib/utils/platform'
   import { ask } from '@tauri-apps/plugin-dialog'
   import { Button } from '$lib/components/ui/button'
+  import FilterButton from '$lib/components/ui/filter-button.svelte'
   import { Input } from '$lib/components/ui/input'
   import { Label } from '$lib/components/ui/label'
   import { RadioGroup, RadioGroupItem } from '$lib/components/ui/radio-group'
@@ -32,7 +36,6 @@
     Clock,
     CornerDownLeft,
     Edit2,
-    Filter,
     GitBranch,
     Info,
     Milestone,
@@ -41,6 +44,12 @@
     Trash2,
     X,
   } from '@lucide/svelte'
+
+  const FILTER_OPTIONS: { group: LandmarkFilterGroup; label: string }[] = [
+    { group: 'firstLast', label: 'Show first and last entry' },
+    { group: 'chapters', label: 'Show chapter borders' },
+    { group: 'checkpoints', label: 'Show checkpoints' },
+  ]
 
   /**
    * Anchors and reconciliation live beside navigation rather than in the world sidebar: both
@@ -93,32 +102,9 @@
   )
   const orphaned = $derived(landmarkList.orphaned)
 
-  const showChapters = $derived(ui.navShowChapters)
-  // Opened by hover where there is a mouse, by a tap where there is not.
-  let tailInfoOpen = $state(false)
-  let tailInfoTimer: ReturnType<typeof setTimeout> | undefined
+  const filtered = $derived(LANDMARK_FILTER_GROUPS.some((group) => !ui.navFilter[group]))
 
-  // Waits like a native tooltip, so passing over the icon does not flash the note.
-  function hoverTailInfo(event: PointerEvent, entering: boolean) {
-    if (event.pointerType !== 'mouse') return
-    clearTimeout(tailInfoTimer)
-    if (entering) tailInfoTimer = setTimeout(() => (tailInfoOpen = true), 500)
-    else tailInfoOpen = false
-  }
-
-  const showFirstLast = $derived(ui.navShowFirstLast)
-  const showCheckpoints = $derived(ui.navShowCheckpoints)
-
-  const filtered = $derived(!showChapters || !showFirstLast || !showCheckpoints)
-
-  const landmarks = $derived(
-    landmarkList.landmarks.filter((landmark) => {
-      if (landmark.kind === 'chapter' || landmark.kind === 'tail') return showChapters
-      if (landmark.kind === 'first' || landmark.kind === 'last') return showFirstLast
-      if (landmark.kind === 'origin' || landmark.kind === 'checkpoint') return showCheckpoints
-      return true
-    }),
-  )
+  const landmarks = $derived(filterLandmarks(landmarkList.landmarks, ui.navFilter))
 
   // Not persisted with the panel's own state: a reader who opens this to clear one checkpoint out
   // does not want it open on every story afterwards. Closing the panel unmounts this component,
@@ -324,40 +310,19 @@
           <DropdownMenu.Root>
             <DropdownMenu.Trigger>
               {#snippet child({ props })}
-                <Button
-                  variant="outline"
-                  size="icon"
-                  class="h-7 w-7 {filtered ? 'text-amber-500 hover:text-amber-500' : ''}"
-                  aria-label="Filter landmarks"
-                  title="Filter landmarks"
-                  {...props}
-                >
-                  <Filter class="h-3.5 w-3.5" />
-                </Button>
+                <FilterButton active={filtered} label="Filter landmarks" {...props} />
               {/snippet}
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="end">
-              <DropdownMenu.CheckboxItem
-                checked={showFirstLast}
-                onCheckedChange={(checked) => void ui.setNavShowFirstLast(checked)}
-                closeOnSelect={false}
-              >
-                Show first and last entry
-              </DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showChapters}
-                onCheckedChange={(checked) => void ui.setNavShowChapters(checked)}
-                closeOnSelect={false}
-              >
-                Show chapter borders
-              </DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showCheckpoints}
-                onCheckedChange={(checked) => void ui.setNavShowCheckpoints(checked)}
-                closeOnSelect={false}
-              >
-                Show checkpoints
-              </DropdownMenu.CheckboxItem>
+              {#each FILTER_OPTIONS as option (option.group)}
+                <DropdownMenu.CheckboxItem
+                  checked={ui.navFilter[option.group]}
+                  onCheckedChange={(checked) => void ui.setNavFilter(option.group, checked)}
+                  closeOnSelect={false}
+                >
+                  {option.label}
+                </DropdownMenu.CheckboxItem>
+              {/each}
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>
@@ -367,7 +332,9 @@
             icon={Milestone}
             size="sm"
             title="No landmarks"
-            description="This branch has no starting point, chapters or checkpoints to jump to. Checkpoints are saved at chapter boundaries."
+            description={landmarkList.landmarks.length > 0
+              ? 'The landmark filter is hiding every landmark on this branch.'
+              : 'This branch has no starting point, chapters or checkpoints to jump to. Checkpoints are saved at chapter boundaries.'}
             class="py-6"
           />
         {:else}
@@ -452,15 +419,15 @@
                     <div
                       class="can-hover:opacity-0 absolute top-1 right-1 flex transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                     >
-                      <Popover.Root bind:open={tailInfoOpen}>
-                        <Popover.Trigger>
+                      <!-- Opens on hover after a delay like a native tooltip, and on a tap where
+                           there is no hover. -->
+                      <Popover.Root>
+                        <Popover.Trigger openOnHover openDelay={500}>
                           {#snippet child({ props })}
                             <button
                               {...props}
                               class="text-surface-500 hover:text-surface-200 tap-target"
                               aria-label="About this landmark"
-                              onpointerenter={(e) => hoverTailInfo(e, true)}
-                              onpointerleave={(e) => hoverTailInfo(e, false)}
                             >
                               <Info class="can-hover:size-3 size-4" />
                             </button>

@@ -7,6 +7,7 @@ import {
   checkpointsOnBranch,
   checkpointDeletionBlocker,
   contextLift,
+  filterLandmarks,
   entryNumber,
   entryNumberRange,
   jumpToEntry,
@@ -160,7 +161,11 @@ function interior(...args: Parameters<typeof buildLandmarks>): ReturnType<typeof
   const result = buildLandmarks(...args)
   return {
     ...result,
-    landmarks: result.landmarks.filter((l) => l.kind !== 'first' && l.kind !== 'last'),
+    landmarks: filterLandmarks(result.landmarks, {
+      firstLast: false,
+      chapters: true,
+      checkpoints: true,
+    }),
   }
 }
 
@@ -613,14 +618,62 @@ describe('entryNumberRange', () => {
 })
 
 describe('contextLift', () => {
-  const viewport = 1000 // the cap is 300
+  const viewportHeight = 1000 // the cap is 300
+  // A 100px card and a 12px gap.
+  const short = { distance: 112, aboveHeight: 100, offset: 0, viewportHeight }
 
-  it('lifts a short card by its whole distance, gap included, and keeps a margin above it', () => {
-    expect(contextLift(112, viewport, 12)).toBe(124)
-    expect(contextLift(300, viewport, 12)).toBe(312)
+  it('lifts a short card by its whole distance and keeps part of the gap above it', () => {
+    expect(contextLift(short)).toBe(112 + 9)
+  })
+
+  it('keeps the margin under the gap, so the card before does not show', () => {
+    for (const gap of [8, 10, 12, 16, 24]) {
+      const margin = contextLift({ ...short, distance: 100 + gap }) - (100 + gap)
+      expect(margin).toBeGreaterThan(0)
+      expect(margin).toBeLessThan(gap)
+    }
   })
 
   it('clips a tall entry at the cap, as a short one would be, rather than hiding it', () => {
-    expect(contextLift(900, viewport, 12)).toBe(312)
+    expect(contextLift({ ...short, distance: 912, aboveHeight: 900 })).toBe(300 + 9)
+  })
+
+  it('lifts only what the landing has not already gained by sitting below the top', () => {
+    expect(contextLift({ ...short, offset: 50 })).toBe(112 + 9 - 50)
+    expect(contextLift({ ...short, offset: 500 })).toBe(0)
+  })
+
+  it('treats a landing above the top edge as sitting at it', () => {
+    expect(contextLift({ ...short, offset: -20 })).toBe(112 + 9)
+  })
+})
+
+describe('filterLandmarks', () => {
+  const view = [entry('m0', 0), entry('m1', 1), entry('b2', 2, 'br1')]
+  const br1 = branch('br1', 'm1', 'Betrayal', 'cp-origin')
+  const banners = buildChapterBanners(view, [chapter('c1', 1, 'm0', 'm1', 'Opening')])
+  const { landmarks } = buildLandmarks(view, [checkpoint('cp', 'b2')], [br1], br1, banners)
+  const all = { firstLast: true, chapters: true, checkpoints: true }
+  const kinds = (shown: typeof all) => filterLandmarks(landmarks, shown).map((l) => l.kind)
+
+  it('keeps every row when every group is shown', () => {
+    expect(filterLandmarks(landmarks, all)).toEqual(landmarks)
+  })
+
+  it('takes chapter starts and the tail together', () => {
+    expect(kinds({ ...all, chapters: false })).not.toContain('chapter')
+    expect(kinds({ ...all, chapters: false })).not.toContain('tail')
+  })
+
+  it('takes the origin row with the checkpoints', () => {
+    const shown = kinds({ ...all, checkpoints: false })
+    expect(shown).not.toContain('origin')
+    expect(shown).not.toContain('checkpoint')
+  })
+
+  it('takes the first and last entry together', () => {
+    const shown = kinds({ ...all, firstLast: false })
+    expect(shown).not.toContain('first')
+    expect(shown).not.toContain('last')
   })
 })

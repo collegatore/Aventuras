@@ -44,6 +44,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 import { StreamingHtmlRenderer } from '$lib/utils/htmlStreaming'
 import { countTokens } from '$lib/services/tokenizer'
 import { branchScopeKey } from '$lib/utils/branchScope'
+import type { LandmarkFilterGroup } from '$lib/utils/storyNavigation'
 
 export type VaultTab = 'characters' | 'lorebooks' | 'scenarios' | 'prompts'
 
@@ -115,6 +116,12 @@ interface PersistedActivationData {
 }
 
 // UI State using Svelte 5 runes
+export const NAV_FILTER_SETTING: Record<LandmarkFilterGroup, string> = {
+  firstLast: 'nav_show_first_last',
+  chapters: 'nav_show_chapters',
+  checkpoints: 'nav_show_checkpoints',
+}
+
 class UIStore {
   activePanel = $state<ActivePanel>('story')
   sidebarTab = $state<SidebarTab>('characters')
@@ -149,12 +156,12 @@ class UIStore {
   private galleryImageCache = new SvelteMap<string, EmbeddedImageMeta[]>()
 
   galleryNewestFirst = $state(false)
-  /** Whether the landmark list shows chapter starts and where the story continues past the last. */
-  navShowChapters = $state(true)
-  /** Whether the landmark list shows the first and last entry of the branch. */
-  navShowFirstLast = $state(true)
-  /** Whether the landmark list shows checkpoints, and the origin a branch was forked from. */
-  navShowCheckpoints = $state(true)
+  /** Which groups of rows the landmark list shows. */
+  navFilter = $state<Record<LandmarkFilterGroup, boolean>>({
+    firstLast: true,
+    chapters: true,
+    checkpoints: true,
+  })
 
   // Streaming state
   streamingContent = $state('')
@@ -422,24 +429,10 @@ class UIStore {
       .catch((err) => console.warn('[UI] Failed to persist gallery order:', err))
   }
 
-  setNavShowChapters(show: boolean): Promise<void> {
-    this.navShowChapters = show
+  setNavFilter(group: LandmarkFilterGroup, show: boolean): Promise<void> {
+    this.navFilter[group] = show
     return database
-      .setSetting('nav_show_chapters', show.toString())
-      .catch((err) => console.warn('[UI] Failed to persist landmark filter:', err))
-  }
-
-  setNavShowCheckpoints(show: boolean): Promise<void> {
-    this.navShowCheckpoints = show
-    return database
-      .setSetting('nav_show_checkpoints', show.toString())
-      .catch((err) => console.warn('[UI] Failed to persist landmark filter:', err))
-  }
-
-  setNavShowFirstLast(show: boolean): Promise<void> {
-    this.navShowFirstLast = show
-    return database
-      .setSetting('nav_show_first_last', show.toString())
+      .setSetting(NAV_FILTER_SETTING[group], show.toString())
       .catch((err) => console.warn('[UI] Failed to persist landmark filter:', err))
   }
 
