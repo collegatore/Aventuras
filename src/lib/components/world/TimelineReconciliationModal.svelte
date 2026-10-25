@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StoryTimeField from '#lib/components/shared/StoryTimeField.svelte'
   import { story, type TimelineReconciliationPreview } from '#lib/stores/story.svelte.ts'
   import { ui } from '#lib/stores/ui.svelte.ts'
   import { Button } from '#lib/components/ui/button/index.ts'
@@ -998,20 +999,13 @@
         </Button>
 
         {#if editingKind === 'anchor'}
-          <label class="flex flex-wrap items-center gap-2">
-            <span class="text-muted-foreground shrink-0">Asserted time</span>
-            <Input
-              placeholder="e.g. Y1 D4 14:30"
-              class="h-7 w-36 text-xs"
-              bind:value={anchorTimeText}
-            />
-            <span class="text-muted-foreground shrink-0">
-              {anchorTime ? `= ${formatStoryTime(anchorTime)}` : 'year, day, clock'}
-            </span>
-          </label>
-          {#if storyTimeIsInvalid(anchorTimeText)}
-            <p class="text-destructive">Not a story time. Try 14:30, D4 14:30, or Y1 D4 14:30.</p>
-          {/if}
+          <StoryTimeField
+            label="Asserted time"
+            compact
+            placeholder="e.g. Y1 D4 14:30"
+            examples="14:30, D4 14:30, or Y1 D4 14:30"
+            bind:value={anchorTimeText}
+          />
           <label class="flex flex-col gap-1">
             <span class="text-muted-foreground">Note</span>
             <Textarea
