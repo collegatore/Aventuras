@@ -3,6 +3,8 @@
   import { createDebouncedSave } from '#lib/utils/debounce.ts'
   import { settings } from '#lib/stores/settings.svelte.ts'
   import { Label } from '#lib/components/ui/label/index.ts'
+  import { Switch } from '#lib/components/ui/switch/index.ts'
+  import { Checkbox } from '#lib/components/ui/checkbox/index.ts'
   import { Button } from '#lib/components/ui/button/index.ts'
   import { Input } from '#lib/components/ui/input/index.ts'
   import { Autocomplete } from '#lib/components/ui/autocomplete/index.ts'
@@ -14,8 +16,16 @@
     getProviderSamplerInfo,
     listLoras,
     generateImage,
-    requiresApiKey,
+    takesApiKey,
+    baseUrlMode,
+    IMAGE_PROVIDER_LABELS,
+    IMAGE_PROVIDER_OPTIONS,
     ComfyMode,
+    loadImageInputs,
+    referenceInputsOf,
+    referenceLimit,
+    suggestReferenceInputs,
+    type ComfyCustomWorkflow,
     type ImageModelInfo,
   } from '#lib/services/ai/image/index.ts'
   import {
@@ -24,7 +34,6 @@
     fetchModelList,
     clearComfyCacheForUrl,
   } from '#lib/services/ai/image/providers/comfy.ts'
-  import type { ComfyCustomWorkflow } from '#lib/services/ai/image/providers/types.ts'
   import ImageModelSelect from '#lib/components/settings/ImageModelSelect.svelte'
   import type { ImageProfile, ImageProviderType, APIProfile } from '#lib/types/index.ts'
   import * as Tabs from '#lib/components/ui/tabs/index.ts'
@@ -42,17 +51,8 @@
     { value: 'image-style-photorealistic', label: 'Photorealistic' },
   ] as const
 
-  const providerTypes: { value: ImageProviderType; label: string }[] = [
-    { value: 'nanogpt', label: 'NanoGPT' },
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'openrouter', label: 'OpenRouter' },
-    { value: 'chutes', label: 'Chutes' },
-    { value: 'pollinations', label: 'Pollinations' },
-    { value: 'google', label: 'Google AI Studio' },
-    { value: 'zhipu', label: 'Zhipu CogView' },
-    { value: 'comfyui', label: 'ComfyUI' },
-    { value: 'a1111', label: 'A1111 / SD.cpp / Kobold' },
-  ]
+  const profileOptionLabel = (p: ImageProfile) =>
+    `${p.name} (${IMAGE_PROVIDER_LABELS[p.providerType] ?? p.providerType}${p.model ? ` · ${p.model}` : ''})`
   const profileModes = [
     { value: ComfyMode.CustomWorkflow, label: 'Custom Workflow' },
     { value: ComfyMode.BasicTxt2Img, label: 'Basic Text to Image' },
@@ -127,11 +127,6 @@
   // Profile form model state
   let profileModel = $state('')
   let profileModels = $state<ImageModelInfo[]>([])
-  const referenceProfileImg2ImgWarning = $derived(
-    isEditingReferenceProfile &&
-      !!profileModel &&
-      profileModels.find((m) => m.id === profileModel)?.supportsImg2Img === false,
-  )
   let isLoadingProfileModels = $state(false)
   let profileModelsError = $state<string | null>(null)
 
@@ -152,14 +147,33 @@
   const { trigger: triggerAutoSave, flush: flushAutoSave } = createDebouncedSave(autoSaveProfile)
 
   // Custom workflow state
-  let profileCustomWorkflow = $state<ComfyCustomWorkflow | null>(null)
+  let profileCustomWorkflow = $state.raw<ComfyCustomWorkflow | null>(null)
+  let profileInputReferences = $state(false)
+  let profileTakesReferences = $state(false)
+  const activeWorkflow = $derived(
+    profileMode === ComfyMode.CustomWorkflow ? profileCustomWorkflow : null,
+  )
+  const workflowGraph = $derived(activeWorkflow?.workflow)
+  const loadImageNodes = $derived(workflowGraph ? loadImageInputs(workflowGraph) : [])
+  const selectedReferenceInputs = $derived(activeWorkflow ? referenceInputsOf(activeWorkflow) : [])
+  // The clause after "but" for a provider type that cannot send references.
+  const NO_REFERENCES_REASON: Partial<Record<ImageProviderType, string>> = {
+    comfyui: 'it needs a custom workflow with a selected LoadImage node to use reference images.',
+    a1111: 'the "Model takes reference images" switch is off.',
+  }
+  // Null when the profile can send references.
+  const referenceProfileWarningReason = $derived.by(() => {
+    if (!isEditingReferenceProfile) return null
+    if (referenceLimit(profileProviderType, buildProviderOptions()) === 0) {
+      return NO_REFERENCES_REASON[profileProviderType] ?? 'it cannot send reference images.'
+    }
+    return !!profileModel &&
+      profileModels.find((m) => m.id === profileModel)?.supportsImg2Img === false
+      ? 'the selected model does not support img2img.'
+      : null
+  })
   // Holds parsed workflow data while the user resolves an ambiguous picker — not yet saved to profileCustomWorkflow
-  let pendingWorkflowData = $state<{
-    workflow: ComfyCustomWorkflow['workflow']
-    seedPath: string
-    outputNodeId: string
-    negativePromptPath: string | null
-  } | null>(null)
+  let pendingWorkflowData = $state<Omit<ComfyCustomWorkflow, 'positivePromptPath'> | null>(null)
   let workflowAmbiguousNodes = $state<
     Array<{
       nodeId: string
@@ -240,6 +254,7 @@
       profileModels = models
     } catch (error) {
       if (reqId !== profileModelsReqId) return
+      profileModels = []
       profileModelsError = error instanceof Error ? error.message : 'Failed to load models'
     } finally {
       if (reqId === profileModelsReqId) isLoadingProfileModels = false
@@ -330,6 +345,7 @@
         negativePrompt: profileNegativePrompt,
         sampler: profileSampler,
         scheduler: profileScheduler,
+        ...(profileTakesReferences && { takesReferences: true }),
       }
     }
     if (profileProviderType !== 'comfyui') return {}
@@ -352,6 +368,7 @@
     if (profileCustomWorkflow) {
       opts.customWorkflow = profileCustomWorkflow
     }
+    if (profileInputReferences) opts.inputReferences = true
     if (profileMode === ComfyMode.UnetTxt2Img) {
       if (profileClipName) opts.clipName = profileClipName
       if (profileVaeName) opts.vaeName = profileVaeName
@@ -395,6 +412,8 @@
         profileLoraStrengthModel,
         profileLoraStrengthClip,
         profileCustomWorkflow,
+        profileInputReferences,
+        profileTakesReferences,
         profileClipName,
         profileVaeName,
         profileClipType,
@@ -436,6 +455,8 @@
     profileNegativePrompt = ''
     prevComfyBaseUrl = null
     profileCustomWorkflow = null
+    profileInputReferences = false
+    profileTakesReferences = false
     pendingWorkflowData = null
     workflowAmbiguousNodes = []
     workflowPickerSelection = ''
@@ -466,6 +487,8 @@
     profileBaseUrl = profile.baseUrl || ''
     profileModel = profile.model || ''
     profileModels = []
+    profileTakesReferences = profile.providerOptions?.takesReferences === true
+    profileInputReferences = profile.providerOptions?.inputReferences === true
 
     if (profile.providerType === 'a1111') {
       const opts = profile.providerOptions || {}
@@ -598,28 +621,24 @@
     }
 
     workflowFileName = filename
+    const detected = {
+      workflow,
+      seedPath,
+      outputNodeId: outputNodeId!,
+      negativePromptPath: negativeNode?.path ?? null,
+      referenceInputPaths: suggestReferenceInputs(workflow),
+    }
 
     if (positiveNodes.length > 1) {
       // Ambiguous — show picker. Store parsed data in pending state; do NOT write
       // profileCustomWorkflow yet so the auto-save effect doesn't fire prematurely.
-      pendingWorkflowData = {
-        workflow,
-        seedPath,
-        outputNodeId: outputNodeId!,
-        negativePromptPath: negativeNode?.path ?? null,
-      }
+      pendingWorkflowData = detected
       workflowAmbiguousNodes = positiveNodes
       workflowPickerSelection = positiveNodes[0].path
     } else {
       // Unambiguous — auto-confirm immediately
       pendingWorkflowData = null
-      profileCustomWorkflow = {
-        workflow,
-        positivePromptPath: positiveNodes[0].path,
-        seedPath,
-        outputNodeId: outputNodeId!,
-        negativePromptPath: negativeNode?.path ?? null,
-      }
+      profileCustomWorkflow = { ...detected, positivePromptPath: positiveNodes[0].path }
       workflowAmbiguousNodes = []
     }
   }
@@ -640,6 +659,15 @@
     reader.readAsText(file)
     // Reset input so the same file can be re-selected after clearing
     input.value = ''
+  }
+
+  function toggleReferenceInput(path: string, selected: boolean) {
+    if (!profileCustomWorkflow) return
+    const others = selectedReferenceInputs.filter((p) => p !== path)
+    profileCustomWorkflow = {
+      ...profileCustomWorkflow,
+      referenceInputPaths: selected ? [...others, path] : others,
+    }
   }
 
   function confirmWorkflowPicker() {
@@ -792,8 +820,7 @@
                       <div class="min-w-0 flex-1">
                         <span class="text-sm font-medium">{profile.name}</span>
                         <p class="text-muted-foreground text-xs">
-                          {providerTypes.find((p) => p.value === profile.providerType)?.label ||
-                            profile.providerType}
+                          {IMAGE_PROVIDER_LABELS[profile.providerType] ?? profile.providerType}
                           {profile.model ? ` · ${profile.model}` : ''}
                           {profile.apiKey ? ' · Key configured' : ' · No API key'}
                         </p>
@@ -851,8 +878,7 @@
                     items={settings.imageProfiles}
                     selected={getSelectedImageProfile('standard')}
                     onSelect={(v) => onProfileChange((v as ImageProfile).id, 'standard')}
-                    itemLabel={(p: ImageProfile) =>
-                      `${p.name} (${providerTypes.find((t) => t.value === p.providerType)?.label || p.providerType}${p.model ? ` · ${p.model}` : ''})`}
+                    itemLabel={profileOptionLabel}
                     itemValue={(p: ImageProfile) => p.id}
                     placeholder="Select an image profile"
                   />
@@ -878,8 +904,7 @@
                     items={settings.imageProfiles}
                     selected={getSelectedImageProfile('reference')}
                     onSelect={(v) => onProfileChange((v as ImageProfile).id, 'reference')}
-                    itemLabel={(p: ImageProfile) =>
-                      `${p.name} (${providerTypes.find((t) => t.value === p.providerType)?.label || p.providerType}${p.model ? ` · ${p.model}` : ''})`}
+                    itemLabel={profileOptionLabel}
                     itemValue={(p: ImageProfile) => p.id}
                     placeholder="Select an image profile"
                   />
@@ -954,8 +979,7 @@
               items={settings.imageProfiles}
               selected={getSelectedImageProfile('portrait')}
               onSelect={(v) => onProfileChange((v as ImageProfile).id, 'portrait')}
-              itemLabel={(p: ImageProfile) =>
-                `${p.name} (${providerTypes.find((t) => t.value === p.providerType)?.label || p.providerType}${p.model ? ` · ${p.model}` : ''})`}
+              itemLabel={profileOptionLabel}
               itemValue={(p: ImageProfile) => p.id}
               placeholder="Select an image profile"
             />
@@ -1008,8 +1032,7 @@
               items={settings.imageProfiles}
               selected={getSelectedImageProfile('background')}
               onSelect={(v) => onProfileChange((v as ImageProfile).id, 'background')}
-              itemLabel={(p: ImageProfile) =>
-                `${p.name} (${providerTypes.find((t) => t.value === p.providerType)?.label || p.providerType}${p.model ? ` · ${p.model}` : ''})`}
+              itemLabel={profileOptionLabel}
               itemValue={(p: ImageProfile) => p.id}
               placeholder="Select an image profile"
             />
@@ -1056,8 +1079,7 @@
                 items={settings.imageProfiles}
                 selected={settings.imageProfiles.find((p) => p.id === testProfileId)}
                 onSelect={(v) => (testProfileId = (v as ImageProfile).id)}
-                itemLabel={(p: ImageProfile) =>
-                  `${p.name} (${providerTypes.find((t) => t.value === p.providerType)?.label || p.providerType}${p.model ? ` · ${p.model}` : ''})`}
+                itemLabel={profileOptionLabel}
                 itemValue={(p: ImageProfile) => p.id}
                 placeholder="Select a profile to test"
               />
@@ -1123,18 +1145,18 @@
     <div class="space-y-2">
       <Label>Provider</Label>
       <Autocomplete
-        items={providerTypes}
-        selected={providerTypes.find((p) => p.value === profileProviderType)}
+        items={IMAGE_PROVIDER_OPTIONS}
+        selected={IMAGE_PROVIDER_OPTIONS.find((p) => p.value === profileProviderType)}
         onSelect={(v) => {
-          profileProviderType = (v as { value: ImageProviderType }).value
+          if (v && !Array.isArray(v)) profileProviderType = v.value
         }}
-        itemLabel={(p: { label: string }) => p.label}
-        itemValue={(p: { value: string }) => p.value}
+        itemLabel={(p) => p.label}
+        itemValue={(p) => p.value}
         placeholder="Select provider"
       />
     </div>
 
-    {#if requiresApiKey(profileProviderType)}
+    {#if takesApiKey(profileProviderType)}
       <div class="space-y-2">
         <Label>API Key</Label>
         <div class="flex gap-2">
@@ -1187,9 +1209,11 @@
       </div>
     {/if}
 
-    {#if profileProviderType === 'comfyui' || profileProviderType === 'openai' || profileProviderType === 'zhipu' || profileProviderType === 'a1111'}
+    {#if baseUrlMode(profileProviderType) !== 'none'}
       <div class="space-y-2">
-        <Label>Base URL (optional)</Label>
+        <Label>
+          {baseUrlMode(profileProviderType) === 'required' ? 'Base URL' : 'Base URL (optional)'}
+        </Label>
         <Input bind:value={profileBaseUrl} placeholder="Custom base URL" />
       </div>
     {/if}
@@ -1211,10 +1235,9 @@
         onRefresh={() =>
           loadProfileFormModels(profileProviderType, profileApiKey, profileBaseUrl, true)}
       />
-      {#if referenceProfileImg2ImgWarning}
+      {#if referenceProfileWarningReason}
         <p class="text-warning mt-1 text-xs">
-          This profile is used for reference image generation (img2img), but the selected model does
-          not support img2img.
+          This profile is used for reference image generation, but {referenceProfileWarningReason}
         </p>
       {:else}
         <p class="text-muted-foreground mt-1 text-xs">
@@ -1270,6 +1293,15 @@
         <div class="col-span-2 space-y-2">
           <Label>Negative Prompt</Label>
           <Textarea bind:value={profileNegativePrompt} placeholder="Negative prompt..." />
+        </div>
+        <div class="col-span-2 flex items-center justify-between gap-3">
+          <div>
+            <Label for="a1111-takes-references">Model takes reference images</Label>
+            <p class="text-muted-foreground text-xs">
+              Kontext / Qwen Edit on sd.cpp or KoboldCpp; stock A1111 and Forge ignore them
+            </p>
+          </div>
+          <Switch id="a1111-takes-references" bind:checked={profileTakesReferences} />
         </div>
       </div>
     {/if}
@@ -1377,6 +1409,48 @@
                   <p class="text-muted-foreground italic">
                     No negative prompt node detected (ignored).
                   </p>
+                {/if}
+                {#if loadImageNodes.length === 0}
+                  <p class="text-muted-foreground italic">
+                    No LoadImage node detected (reference images ignored).
+                  </p>
+                {:else}
+                  <div class="space-y-1 pt-1">
+                    <p class="text-muted-foreground">
+                      Reference images → the checked LoadImage nodes. Unchecked ones keep their
+                      saved image.
+                    </p>
+                    {#each loadImageNodes as node (node.path)}
+                      <div class="flex items-center gap-2">
+                        <Checkbox
+                          id="comfy-reference-{node.nodeId}"
+                          checked={selectedReferenceInputs.includes(node.path)}
+                          onCheckedChange={(checked) => toggleReferenceInput(node.path, checked)}
+                        />
+                        <Label for="comfy-reference-{node.nodeId}" class="font-normal">
+                          <code class="text-xs">{node.nodeId}</code>
+                          {node.title}
+                          {#if node.image}
+                            <span class="text-muted-foreground">({node.image})</span>
+                          {/if}
+                        </Label>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                {#if selectedReferenceInputs.length > 0}
+                  <div class="flex items-center justify-between gap-3 pt-1">
+                    <div>
+                      <Label for="comfy-input-references"
+                        >Store references in the input folder</Label
+                      >
+                      <p class="text-muted-foreground">
+                        Use this if reference images fail to load. ComfyUI never clears this folder;
+                        the default temp folder is emptied on restart.
+                      </p>
+                    </div>
+                    <Switch id="comfy-input-references" bind:checked={profileInputReferences} />
+                  </div>
                 {/if}
               </div>
             {:else if workflowAmbiguousNodes.length > 0}

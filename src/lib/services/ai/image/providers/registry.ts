@@ -7,7 +7,7 @@
  */
 
 import { settings } from '#lib/stores/settings.svelte.ts'
-import type { ImageProviderType } from '#lib/types/index.ts'
+import type { ImageProfile, ImageProviderType } from '#lib/types/index.ts'
 import { parseImageSpec, describeImageSpec, type ImageSpec } from '#lib/utils/image.ts'
 import type {
   ImageProvider,
@@ -21,13 +21,13 @@ import { fetchPublicImageBase64 } from './fetchAdapter'
 // Provider factory imports (lazy)
 import { createNanoGPTProvider } from './nanogpt'
 import { createOpenAIProvider } from './openai'
-import { createChutesProvider } from './chutes'
+import { createOpenAICompatibleProvider } from './openaiCompatibleProvider'
 import { createPollinationsProvider } from './pollinations'
 import { createGoogleProvider } from './google'
 import { createZhipuProvider } from './zhipu'
-import { createComfyProvider } from './comfy'
+import { comfyReferenceLimit, createComfyProvider } from './comfy'
 import { createOpenRouterProvider } from './openrouter'
-import { createA1111Provider } from './a1111'
+import { a1111ReferenceLimit, createA1111Provider } from './a1111'
 
 const log = createLogger('ImageRegistry')
 
@@ -40,8 +40,8 @@ type ProviderFactory = (config: ImageProviderConfig) => ImageProvider
 const PROVIDER_FACTORIES: Record<ImageProviderType, ProviderFactory> = {
   nanogpt: createNanoGPTProvider,
   openai: createOpenAIProvider,
+  'openai-compatible': createOpenAICompatibleProvider,
   openrouter: createOpenRouterProvider,
-  chutes: createChutesProvider,
   pollinations: createPollinationsProvider,
   google: createGoogleProvider,
   zhipu: createZhipuProvider,
@@ -49,38 +49,77 @@ const PROVIDER_FACTORIES: Record<ImageProviderType, ProviderFactory> = {
   a1111: createA1111Provider,
 }
 
+export const IMAGE_PROVIDER_LABELS: Record<ImageProviderType, string> = {
+  nanogpt: 'NanoGPT',
+  openai: 'OpenAI',
+  'openai-compatible': 'OpenAI Compatible',
+  openrouter: 'OpenRouter',
+  pollinations: 'Pollinations',
+  google: 'Google AI Studio',
+  zhipu: 'Z.AI',
+  comfyui: 'ComfyUI',
+  a1111: 'A1111 / SD.cpp / Kobold',
+}
+
+type FieldMode = 'required' | 'optional' | 'none'
+
 /**
- * Whether a provider authenticates with an API key. Only the ones that run on the user's
- * own machine do not. Exhaustive by type, so a new provider has to declare which it is.
+ * How a provider uses an API key: `required` for the hosted ones, `optional` for an endpoint
+ * the user runs or fronts themselves, `none` for the ones that run on the user's own machine.
+ * Exhaustive by type, so a new provider has to declare which it is.
  *
  * Pollinations counts as requiring one: the model list is served without it, but
  * generation is not, and a profile that can list and cannot draw is the worse failure —
  * it looks configured.
  */
-const PROVIDER_REQUIRES_API_KEY: Record<ImageProviderType, boolean> = {
-  nanogpt: true,
-  openai: true,
-  openrouter: true,
-  chutes: true,
-  google: true,
-  zhipu: true,
-  pollinations: true,
-  comfyui: false,
-  a1111: false,
+const PROVIDER_API_KEY: Record<ImageProviderType, FieldMode> = {
+  nanogpt: 'required',
+  openai: 'required',
+  'openai-compatible': 'optional',
+  openrouter: 'required',
+  google: 'required',
+  zhipu: 'required',
+  pollinations: 'required',
+  comfyui: 'none',
+  a1111: 'none',
 }
 
-/** Whether the adapter sends reference images; the rest would only waste the download. */
-const PROVIDER_READS_REFERENCES: Record<ImageProviderType, boolean> = {
-  nanogpt: true,
-  openai: true,
-  openrouter: true,
-  pollinations: true,
-  google: true,
-  chutes: false,
-  zhipu: false,
-  comfyui: false,
-  a1111: false,
+/** Whether a provider takes a base URL: `required` when it has no endpoint of its own to default to. */
+const PROVIDER_BASE_URL: Record<ImageProviderType, FieldMode> = {
+  nanogpt: 'none',
+  openai: 'optional',
+  'openai-compatible': 'required',
+  openrouter: 'none',
+  google: 'none',
+  zhipu: 'optional',
+  pollinations: 'none',
+  comfyui: 'optional',
+  a1111: 'optional',
 }
+
+const unlimited = () => Infinity
+
+/** How many references the adapter sends; 0 skips the download. */
+const PROVIDER_REFERENCE_LIMIT: Record<
+  ImageProviderType,
+  (providerOptions: ImageProfile['providerOptions']) => number
+> = {
+  nanogpt: unlimited,
+  openai: unlimited,
+  'openai-compatible': unlimited,
+  openrouter: unlimited,
+  pollinations: unlimited,
+  google: unlimited,
+  zhipu: () => 0,
+  comfyui: comfyReferenceLimit,
+  a1111: a1111ReferenceLimit,
+}
+
+/** How many references a profile of this provider type sends; 0 means none. */
+export const referenceLimit = (
+  providerType: ImageProviderType,
+  providerOptions: ImageProfile['providerOptions'],
+): number => PROVIDER_REFERENCE_LIMIT[providerType](providerOptions)
 
 // ============================================================================
 // Model Cache
@@ -107,13 +146,32 @@ function getCacheKey(providerType: ImageProviderType, apiKey?: string, baseUrl?:
 /**
  * Check if a provider type supports image generation.
  */
-export function supportsImageGeneration(providerType: string): boolean {
-  return providerType in PROVIDER_FACTORIES
+export function supportsImageGeneration(providerType: string): providerType is ImageProviderType {
+  return Object.hasOwn(PROVIDER_FACTORIES, providerType)
+}
+
+export const IMAGE_PROVIDER_OPTIONS = Object.entries(IMAGE_PROVIDER_LABELS).flatMap(
+  ([value, label]) => (supportsImageGeneration(value) ? [{ value, label }] : []),
+)
+
+// An unknown provider is assumed to need a key and to take no base URL.
+function apiKeyMode(providerType: string): FieldMode {
+  return supportsImageGeneration(providerType) ? PROVIDER_API_KEY[providerType] : 'required'
 }
 
 /** Whether a profile of this provider needs an API key to be usable. */
 export function requiresApiKey(providerType: string): boolean {
-  return PROVIDER_REQUIRES_API_KEY[providerType as ImageProviderType] ?? true
+  return apiKeyMode(providerType) === 'required'
+}
+
+/** Whether a profile of this provider has an API key field at all. */
+export function takesApiKey(providerType: string): boolean {
+  return apiKeyMode(providerType) !== 'none'
+}
+
+/** Whether a profile of this provider needs, may take, or has no base URL. */
+export function baseUrlMode(providerType: string): FieldMode {
+  return supportsImageGeneration(providerType) ? PROVIDER_BASE_URL[providerType] : 'none'
 }
 
 /**
@@ -122,7 +180,7 @@ export function requiresApiKey(providerType: string): boolean {
  */
 export async function supportsReferenceImages(profileId: string, model: string): Promise<boolean> {
   const profile = settings.getImageProfile(profileId)
-  if (!profile || !PROVIDER_READS_REFERENCES[profile.providerType]) return false
+  if (!profile || referenceLimit(profile.providerType, profile.providerOptions) === 0) return false
   const modelInfo = (await listImageModels(profileId)).find((m) => m.id === model)
   return modelInfo?.supportsImg2Img !== false
 }
@@ -182,13 +240,13 @@ export async function generateImage(options: {
   const modelInfo = (await listImageModels(profileId).catch(() => [])).find((m) => m.id === model)
 
   // A reference that cannot be fetched is dropped; the scene is still worth drawing without it.
+  const providerLimit = referenceLimit(profile.providerType, profile.providerOptions)
+  const limit = Math.min(modelInfo?.maxReferenceImages ?? Infinity, providerLimit)
   const cleanRefs =
-    referenceImages && PROVIDER_READS_REFERENCES[profile.providerType]
+    referenceImages && providerLimit > 0
       ? (
           await Promise.allSettled(
-            referenceImages
-              .slice(0, modelInfo?.maxReferenceImages)
-              .map((img) => toRawBase64(img, signal)),
+            referenceImages.slice(0, limit).map((img) => toRawBase64(img, signal)),
           )
         ).flatMap((result) => {
           if (result.status === 'fulfilled') return [result.value]
@@ -239,7 +297,8 @@ export async function listImageModels(profileId: string): Promise<ImageModelInfo
 
 /**
  * List image models by provider type directly (without needing a profile).
- * Used during profile creation to preview available models.
+ * Used during profile creation to preview available models. A failed fetch rethrows so the
+ * form can show it.
  */
 export async function listImageModelsByProvider(
   providerType: ImageProviderType,
@@ -267,7 +326,7 @@ export async function listImageModelsByProvider(
     return models
   } catch (error) {
     log('Error listing models by provider', { providerType, error })
-    return []
+    throw error
   }
 }
 
@@ -276,7 +335,7 @@ export async function listImageModelsByProvider(
  */
 export async function getProviderSamplerInfo(
   baseUrl?: string,
-  providerType: 'comfyui' | 'a1111' = 'comfyui',
+  providerType: Extract<ImageProviderType, 'comfyui' | 'a1111'> = 'comfyui',
 ): Promise<{ samplers: string[]; schedulers: string[] }> {
   try {
     const config: ImageProviderConfig = {

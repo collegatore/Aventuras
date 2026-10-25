@@ -25,6 +25,11 @@ export {
   getProviderSamplerInfo,
   listLoras,
   requiresApiKey,
+  takesApiKey,
+  baseUrlMode,
+  referenceLimit,
+  IMAGE_PROVIDER_LABELS,
+  IMAGE_PROVIDER_OPTIONS,
   type ImageModelInfo,
 } from './providers/registry'
 
@@ -32,6 +37,9 @@ export {
 export {
   isImageGenerationEnabled,
   hasRequiredCredentials,
+  missingCredential,
+  portraitCredentialError,
+  type MissingCredential,
   type ImageProfileSlot,
   getProviderDisplayName,
   retryImageGeneration,
@@ -56,4 +64,10 @@ export { resolveStylePrompt, resolveStylePromptForPack } from './stylePrompt'
 // Constants
 export { DEFAULT_FALLBACK_STYLE_PROMPT } from './constants'
 // Provider types
-export { ComfyMode } from './providers/comfy'
+export {
+  ComfyMode,
+  loadImageInputs,
+  referenceInputsOf,
+  suggestReferenceInputs,
+} from './providers/comfy'
+export type { ComfyCustomWorkflow } from './providers/types'

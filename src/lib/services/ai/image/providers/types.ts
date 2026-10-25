@@ -7,7 +7,7 @@
 
 import type { ImageProviderType } from '#lib/types/index.ts'
 import type { ImageSpec } from '#lib/utils/image.ts'
-import type { DeepKeys } from '@saintno/comfyui-sdk'
+import type { Json } from './comfyImage'
 // Provider specific types
 export type ComfySamplerInfo = {
   samplers: string[]
@@ -19,16 +19,22 @@ export interface ComfyCustomWorkflow {
   /** The raw API-format workflow JSON (node IDs as keys). */
   workflow: Record<
     string,
-    { inputs: Record<string, unknown>; class_type: string; _meta?: { title?: string } }
+    {
+      inputs: Record<string, Json>
+      class_type: string
+      _meta?: { title?: string }
+    }
   >
   /** Dot-path to the positive CLIPTextEncode text input, e.g. "57:27.inputs.text" */
-  positivePromptPath: DeepKeys<any>
+  positivePromptPath: string
   /** Dot-path to the seed input on the KSampler node, e.g. "57:3.inputs.seed" */
-  seedPath: DeepKeys<any>
+  seedPath: string
   /** Node ID of the SaveImage output node, e.g. "9" */
-  outputNodeId: DeepKeys<any>
+  outputNodeId: string
   /** Dot-path to the negative CLIPTextEncode text input, if detected — null otherwise. */
-  negativePromptPath: DeepKeys<any> | null
+  negativePromptPath: string | null
+  /** `LoadImage` image inputs that take reference images; absent means the probe's suggestion. */
+  referenceInputPaths?: string[]
 }
 
 export interface ImageGenerateOptions {
@@ -52,7 +58,8 @@ export interface ImageModelInfo {
   id: string
   name: string
   description?: string
-  supportsImg2Img: boolean
+  /** Absent means unknown. */
+  supportsImg2Img?: boolean
   /** How many reference images one request takes; absent means no known limit. */
   maxReferenceImages?: number
   /**
@@ -62,6 +69,8 @@ export interface ImageModelInfo {
    * `1k`/`2k`/`4k`, and a model offering only the latter has no dimensions to normalise to.
    */
   supportedResolutions?: string[]
+  /** The `w:h` ratios this model accepts, verbatim; options like `auto` are left out. */
+  supportedAspectRatios?: string[]
   costPerImage?: number
   costPerTextToken?: number
   costPerImageToken?: number
