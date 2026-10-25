@@ -1003,7 +1003,6 @@
             label="Asserted time"
             compact
             placeholder="e.g. Y1 D4 14:30"
-            examples="14:30, D4 14:30, or Y1 D4 14:30"
             bind:value={anchorTimeText}
           />
           <label class="flex flex-col gap-1">
